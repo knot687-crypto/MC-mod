@@ -1,0 +1,36 @@
+plugins {
+    id 'java'
+}
+
+base {
+    archivesName = "${archives_base_name}-injector"
+}
+
+dependencies {
+    implementation "org.ow2.asm:asm:${asm_version}"
+    implementation "org.ow2.asm:asm-commons:${asm_version}"
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
+}
+
+jar {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    manifest {
+        attributes(
+                'Main-Class': 'dev.vanta.injector.Main',
+                'Premain-Class': 'dev.vanta.injector.Agent',
+                'Agent-Class': 'dev.vanta.injector.Agent',
+                'Can-Retransform-Classes': 'true',
+                'Can-Redefine-Classes': 'true',
+                'Implementation-Title': 'Vanta Injector',
+                'Implementation-Version': project.version
+        )
+    }
+    // Fat jar: ASM is shaded in so the agent works with nothing on the classpath.
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+}

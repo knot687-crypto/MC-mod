@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "vanta",
+  "version": "${version}",
+  "name": "Vanta",
+  "description": "Internal ghost client for 1.21.11 - combat suite, inspector-grade menu, config persistence.",
+  "authors": [
+    "Vanta"
+  ],
+  "license": "MIT",
+  "environment": "client",
+  "icon": "assets/vanta/icon.png",
+  "entrypoints": {
+    "client": [
+      "dev.vanta.Vanta"
+    ]
+  },
+  "mixins": [
+    {
+      "config": "vanta.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=0.19.5",
+    "minecraft": "~1.21.11",
+    "java": ">=21"
+  }
+}

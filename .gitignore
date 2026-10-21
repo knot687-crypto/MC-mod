@@ -1,5 +1,12 @@
 .gradle/
 build/
+*/build/
 run/
+logs/
 *.log
-artifacts/*.jar
+*.iml
+.idea/
+.vscode/
+dist/
+vanta-inject.log
+vanta-inject.log.*

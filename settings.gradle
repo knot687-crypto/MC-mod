@@ -9,4 +9,7 @@ pluginManagement {
     }
 }
 
-rootProject.name = 'veil'
+rootProject.name = 'vanta'
+
+include 'client'
+include 'injector'
