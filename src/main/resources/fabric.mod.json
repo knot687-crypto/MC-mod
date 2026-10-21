@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "veil",
+  "version": "${version}",
+  "name": "Veil",
+  "description": "A quiet, premium ghost client for modern Minecraft combat.",
+  "authors": [
+    "ollie"
+  ],
+  "license": "MIT",
+  "icon": "assets/veil/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "dev.veil.Veil"
+    ]
+  },
+  "mixins": [
+    "veil.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "minecraft": "~1.21.11",
+    "java": ">=21"
+  }
+}
