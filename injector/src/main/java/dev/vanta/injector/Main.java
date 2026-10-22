@@ -3,18 +3,17 @@ package dev.vanta.injector;
 import com.sun.tools.attach.VirtualMachine;
 
 import java.io.File;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
 /**
- * Attach CLI.
+ * Attach CLI. The jar is both the agent and the CLI, so there is nothing else to ship.
  *
  * <pre>
- *   java -jar vanta-injector.jar --list
- *   java -jar vanta-injector.jar --pid 4821 --client vanta-client-1.0.0.jar
+ *   java -jar vanta-1.0.0.jar --list
+ *   java -jar vanta-1.0.0.jar --pid 4821
  * </pre>
  */
 public final class Main {
@@ -24,16 +23,16 @@ public final class Main {
 
     public static void main(String[] args) {
         Path agent = agentJar();
-        Path client = null;
         long pid = -1L;
         boolean list = false;
+        String log = "vanta-inject.log";
 
         for (int i = 0; i < args.length; i++) {
             String argument = args[i];
             switch (argument) {
                 case "--agent" -> agent = Path.of(next(args, ++i, "--agent"));
-                case "--client" -> client = Path.of(next(args, ++i, "--client"));
                 case "--pid" -> pid = Long.parseLong(next(args, ++i, "--pid"));
+                case "--log" -> log = next(args, ++i, "--log");
                 case "--list" -> list = true;
                 case "--help", "-h" -> {
                     usage();
@@ -48,55 +47,43 @@ public final class Main {
         }
 
         if (list) {
-            for (ProcessHandle handle : candidates()) {
+            List<ProcessHandle> found = candidates();
+            if (found.isEmpty()) {
+                System.out.println("[vanta] no running 1.21.11 client found");
+            }
+            for (ProcessHandle handle : found) {
                 System.out.println(handle.pid() + "  " + describe(handle));
             }
             return;
         }
 
         if (agent == null || !agent.toFile().isFile()) {
-            System.out.println("[vanta] injector jar not found; pass --agent <path>");
-            return;
-        }
-        if (client == null) {
-            Path beside = agent.toAbsolutePath().getParent();
-            try (var stream = Files.list(beside)) {
-                client = stream.filter(path -> path.getFileName().toString().startsWith("vanta-client")
-                                && path.getFileName().toString().endsWith(".jar"))
-                        .findFirst().orElse(null);
-            } catch (Exception ignored) {
-                client = null;
-            }
-        }
-        if (client == null || !client.toFile().isFile()) {
-            System.out.println("[vanta] client jar not found; pass --client <path>");
+            System.out.println("[vanta] run the CLI from the vanta jar, or pass --agent <jar>");
             return;
         }
 
         if (pid < 0) {
             List<ProcessHandle> found = candidates();
             if (found.isEmpty()) {
-                System.out.println("[vanta] no running 1.21.11 instance found; start the game first or pass --pid");
+                System.out.println("[vanta] no running 1.21.11 client found; pass --pid <pid>");
                 return;
             }
             pid = found.get(0).pid();
         }
 
-        String target = Long.toString(pid);
         System.out.println("[vanta] attaching to " + pid + " (" + describe(ProcessHandle.of(pid).orElse(null)) + ")");
         try {
-            VirtualMachine machine = VirtualMachine.attach(target);
+            VirtualMachine machine = VirtualMachine.attach(Long.toString(pid));
             try {
-                String options = "client=" + client.toAbsolutePath() + ";log="
-                        + Path.of("vanta-inject.log").toAbsolutePath();
-                machine.loadAgent(agent.toAbsolutePath().toString(), options);
+                machine.loadAgent(agent.toAbsolutePath().toString(),
+                        "log=" + Path.of(log).toAbsolutePath());
             } finally {
                 machine.detach();
             }
-            System.out.println("[vanta] agent loaded - press RSHIFT in game");
+            System.out.println("[vanta] agent loaded, press RSHIFT in game");
         } catch (Throwable throwable) {
             System.out.println("[vanta] attach failed: " + throwable);
-            System.out.println("[vanta] the game must run on the same account and a JDK, not a JRE");
+            System.out.println("[vanta] the game must run on the same JVM and a JDK, not a JRE");
         }
     }
 
@@ -107,6 +94,7 @@ public final class Main {
         return args[index];
     }
 
+    /** Game processes: a java command line that names 1.21.11 and the Minecraft client. */
     private static List<ProcessHandle> candidates() {
         long self = ProcessHandle.current().pid();
         List<ProcessHandle> found = new ArrayList<>();
@@ -115,13 +103,11 @@ public final class Main {
                 continue;
             }
             String line = handle.info().commandLine().orElse("");
-            if (!line.contains("java")) {
+            String lower = line.toLowerCase(Locale.ROOT);
+            if (!lower.contains("java") || !lower.contains("minecraft")) {
                 continue;
             }
-            String lower = line.toLowerCase(Locale.ROOT);
-            boolean fabric = lower.contains("knotclient") || lower.contains("fabric");
-            boolean version = lower.contains("1.21.11") || lower.contains("1_21_11");
-            if (fabric && version) {
+            if (lower.contains("1.21.11") || lower.contains("1_21_11")) {
                 found.add(handle);
             }
         }
@@ -138,7 +124,7 @@ public final class Main {
     private static Path agentJar() {
         try {
             File file = new File(Main.class.getProtectionDomain().getCodeSource().getLocation().toURI());
-            return file.toPath();
+            return Path.of(file.toURI());
         } catch (Exception exception) {
             return null;
         }
@@ -146,11 +132,11 @@ public final class Main {
 
     private static void usage() {
         System.out.println("""
-                vanta injector
-                  --list                 list running 1.21.11 instances
-                  --pid <pid>            target process (auto-detected when omitted)
-                  --agent <jar>          injector jar (defaults to this jar)
-                  --client <jar>         client jar (defaults to a sibling vanta-client-*.jar)
+                vanta internal client 1.21.11
+                  --list              list running 1.21.11 clients
+                  --pid <pid>         target process (auto-detected when omitted)
+                  --agent <jar>       vanta jar to attach (defaults to this jar)
+                  --log <file>        agent log path (default vanta-inject.log)
                 """);
     }
 }

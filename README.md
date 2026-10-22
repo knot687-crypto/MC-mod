@@ -1,286 +1,187 @@
-# VANTA
+# Vanta
 
-Internal ghost client for **Minecraft 1.21.11**. Combat only, client side, humanised by default.
-Fabric mod for the normal path, Java agent injector for the runtime path, one shared core.
+Internal ghost client for **Minecraft Java 1.21.11**.
+
+No Fabric. No Forge. No mods folder. A Java agent attaches to the running game,
+remaps the client's classes into the game's obfuscated namespace and patches five call
+sites in vanilla code. Everything runs inside the Minecraft process.
+
+---
+
+## How it works
 
 ```
-53 java files · 4,108 lines · 13 combat modules · 3 visual modules · 1 premium menu
+vanta-1.0.0.jar
+├── dev/vanta/agent/        agent, mappings, remapping loader, ASM hooks
+├── dev/vanta/**            the client (compiled against Yarn, shipped named)
+├── vanta/mappings.bin      Yarn -> obfuscated table generated from 1.21.11
+└── org/objectweb/asm/**    shaded ASM
+
+premain / agentmain
+  1. parse vanta/mappings.bin                     10,275 classes, 96,465 members
+  2. find the loader that owns the game
+  3. install a retransform-capable transformer   (warm, non re-entrant)
+  4. patch gfj (MinecraftClient#tick)
+           giq (InGameHud#render)
+           hio (ClientPlayerInteractionManager#attackEntity)
+           cgk (Entity#setVelocityClient, Entity#getBoundingBox)
+  5. load dev.vanta.Bootstrap through ClientLoader
+  6. ClientLoader remaps every client class from Yarn names to the game's
+     obfuscated names and defines it inside the game JVM
 ```
 
-![version](https://img.shields.io/badge/minecraft-1.21.11-6b7cff) ![loader](https://img.shields.io/badge/fabric--loader-0.19.5+-3fd9ff)
+`ClientLoader` is the piece a mod loader normally provides. Client sources are written
+against readable Yarn names (`MinecraftClient.getInstance()`, `player.getPos()`) and are
+translated on load; member lookups walk the real class hierarchy so overrides and
+inherited calls resolve correctly.
 
----
-
-## What it is
-
-An **internal** client: it runs inside the game process with direct access to the client
-classes, not an external overlay reading memory. Two ways in:
-
-| Path | How | Hooks |
-| --- | --- | --- |
-| **Fabric mod** | drop `vanta-client-1.0.0.jar` in `.minecraft/mods` | Mixin (`@Inject`) |
-| **Injector** | attach `vanta-injector-1.0.0.jar` to a running instance | ASM retransform at runtime |
-
-Both land on the same core (`dev.vanta.Vanta`), so a feature behaves identically whichever
-door it came through. Everything is client side: no server, no packet spam, no teleports.
-
----
-
-## The menu
-
-`RSHIFT` opens a horizontal type-kit window — header, tab rail, module grid, live settings
-column, status footer. It is drawn entirely with rounded-rectangle primitives, so it stays
-crisp at any GUI scale.
-
-- **Header** — gradient mark, `VANTA` wordmark with letter-spaced caps, `GHOST SUITE · 1.21.11`,
-  search pill with caret, macOS-style window dots.
-- **Tab rail** — `Combat / Visuals / Client`, each with a drawn icon and module count; the
-  active pill and its accent rail slide between tabs.
-- **Module grid** — two columns of cards. Hover raises the card, enables slide the accent bar in,
-  every switch has its own spring animation. Descriptions clip to the card, cards clip to the list.
-- **Settings column** — hover a card and its settings appear live: toggles, gradient sliders with
-  a glowing knob, mode cyclers with drawn chevrons, and a bind chip that captures the next key.
-- **Footer** — hints, fps, ping, active count, accent name.
-- Scroll rails are gradient thumbs, not scrollbars.
-
-### Palette
-
-| Token | Value | Use |
-| --- | --- | --- |
-| `WINDOW_TOP` | `#0C1017` | window gradient top |
-| `WINDOW_BOTTOM` | `#090C11` | window gradient bottom |
-| `HEADER` | `#10151E` | header / footer plate |
-| `CARD` | `#141A25` | module card |
-| `CARD_HOVER` | `#1A2231` | card hover |
-| `CARD_ACTIVE` | `#1C2537` | enabled card |
-| `TEXT` | `#E9EDF7` | primary |
-| `TEXT_DIM` | `#8A93AA` | secondary |
-| `TEXT_FAINT` | `#59627A` | meta |
-| accent A | `#7C5CFF` | violet (default) |
-| accent B | `#3FD9FF` | cyan |
-
-Accent presets: **Violet, Ember, Mint, Rose, Ice** (`Interface → Accent`).
-
----
+The five hooks talk to the client through `dev.vanta.agent.Bridge`, a class that
+references nothing but `java.base`. Nothing in the patched game code can pull a client
+class into the game's loader.
 
 ## Features
 
-### Combat
+**Combat** — KillAura (switch / single, rotation modes, CPS, range, walls, teams),
+AutoClicker (gaussian jitter, block-hit, inventory checks), AimAssist (GCD-snapped,
+smoothing, vertical/horizontal factors), TriggerBot (delay, only-weapon, crits),
+Reach (entity + block, restored on disable), HitBox, Velocity (horizontal/vertical,
+chance, explosion), Criticals (packet/jump), WTap, JumpReset, AutoTotem (health/hole,
+offhand restore), AutoShield, AntiBot (tab-list, ping, sleeping, duplicate names).
 
-| Module | What it does |
-| --- | --- |
-| **KillAura** | Range 2–6, CPS band, FOV gate, sort by distance/angle/health, visible-only, mobs, weapon-only, hold-click mode. Rotations are GCD-snapped to the mouse grid and step at a configurable fraction, only swinging once inside the aim tolerance. |
-| **AutoClicker** | CPS band with gaussian spacing, hold-click, entity-only, cooldown gate, weapon-only. Swings through the real interaction manager so crits/wtaps still fire. |
-| **AimAssist** | Soft pull, never a snap: strength × smoothness, gaussian noise, FOV, visible check, optional horizontal-only. |
-| **TriggerBot** | Swings at whatever the crosshair already touches, with its own CPS band, range gate and miss chance. |
-| **Reach** | Pushes the `entity_interaction_range` / `block_interaction_range` attributes; restores the saved base values on disable. |
-| **HitBox** | Client-side box expansion per player/mob with a chance roll and jitter, so clicks land where the model looks. |
-| **Velocity** | Scales incoming knockback horizontally and vertically, with chance and ground-only gates. Applied at `setVelocityClient`, so vanilla never sees the original. |
-| **Criticals** | Packet mode spoofs one falling tick before the hit, optionally dropping sprint for N ticks; jump mode presses jump instead. |
-| **WTap** | Drops sprint on hit and restores it after a configurable hold, sending the real sprint packets. |
-| **JumpReset** | Auto-jumps the tick after knockback, with delay and chance. |
-| **AutoTotem** | Swaps a totem into the offhand under a health threshold, with a delay floor and optional combat check. |
-| **AutoShield** | Raises the offhand shield when a target enters range, with a delay floor. |
-| **AntiBot** | Tab-list and invisibility heuristics; every targeting query runs through it. |
+**Visual** — Watermark/ArrayList with accent gradient, TargetHud with health and
+distance, HitMarker.
 
-### Visuals
+**Client** — Interface (RSHIFT menu bind, five accent palettes), JSON config written to
+`<game dir>/config/vanta/config.json`.
 
-| Module | What it does |
-| --- | --- |
-| **Watermark** | Badge, fps/ping/cps line, right-hand module list sorted by width. |
-| **TargetHud** | Name, distance and a smoothed health bar under the crosshair. |
-| **HitMarker** | Four ticks that flash and fade on every landed hit. |
+All combat values are randomised where it matters: click intervals, rotation steps,
+hit chance, box growth. Nothing fires on a fixed tick.
 
-### Client
+## The menu
 
-| Module | What it does |
-| --- | --- |
-| **Interface** | Menu bind (default `RSHIFT`) and accent palette. |
+A horizontal, type-kit style window: gradient header with mark, wordmark, search pill and
+window dots; sliding tab rail with icons and module counts; two-column card grid with
+spring-animated switches and clipped descriptions; live settings column with gradient
+sliders, mode cyclers and bind capture; gradient scroll thumb; stats footer.
 
-Every combat module is humanised: timing is randomised per click, rotations are snapped to
-mouse pixels, nothing fires on a fixed beat, and every target query is gated by FOV, range and
-visibility.
-
----
+Everything is drawn through `Render2D` — rounded rects, vertical gradients, outlines,
+soft shadows and letter-spaced caps built from `DrawContext` scanline fills, so there are
+no textures to load and it scales with GUI scale.
 
 ## Build
 
-Requires **JDK 21**. The wrapper is committed.
+Requires **JDK 21**. Gradle wrapper is committed.
 
 ```bash
 ./gradlew build
 ```
 
-Outputs:
+Output:
 
-```
-client/build/libs/vanta-client-1.0.0.jar      # fabric mod (internal client)
-injector/build/libs/vanta-injector-1.0.0.jar  # java agent + attach CLI, ASM shaded
-```
+| Path | What |
+| --- | --- |
+| `injector/build/libs/vanta-1.0.0.jar` | everything: agent + client + mappings + ASM |
+| `client/build/devlibs/vanta-client-1.0.0-dev.jar` | client classes alone (Yarn names) |
 
-`client/build.gradle` compiles against Loom 1.14.10, Yarn `1.21.11+build.6`, Fabric Loader
-`0.19.5`, Fabric API `0.141.6+1.21.11`. Loom 1.14 remaps mixin targets natively, so there is
-no annotation processor and no refmap file.
+Loom is used **only** to provide the Yarn-named 1.21.11 classes for compilation.
+Nothing from Fabric Loader or Fabric API is compiled against, linked or shipped.
 
-### Dev run
+## Inject
+
+The jar is both the CLI and the agent. Minecraft must already be running on a **JDK**
+(not a JRE), and the CLI has to run on the same JVM/account.
 
 ```bash
-./gradlew :client:runClient
+# list running 1.21.11 clients
+java -jar vanta-1.0.0.jar --list
+
+# attach (auto-detects, or pass --pid)
+java -jar vanta-1.0.0.jar --pid 4821
+
+# or at launch
+java -javaagent:vanta-1.0.0.jar -cp ... net.minecraft.client.main.Main ...
 ```
 
----
+Press **RSHIFT** for the menu. The agent logs to stdout and to `vanta-inject.log`; the log
+lists every hook it bound and every class it patched.
 
-## Install
+## Verification
 
-### A — as a mod
+`tools/Verify.java` runs offline against the real obfuscated 1.21.11 jar and checks,
+in order:
 
-1. Fabric Loader 0.19.5+ for 1.21.11, Fabric API installed.
-2. Drop `vanta-client-1.0.0.jar` into `.minecraft/mods`.
-3. Launch, press `RSHIFT`.
-
-### B — injected
-
-Both jars side by side, then:
+1. all 48 client classes remap without error,
+2. every remapped class / field / method reference exists in the game jar (363 class and
+   329 member references),
+3. every method that overrides a parent method was actually renamed by the remapper,
+4. each remapped class is defined in a JVM, which forces HotSpot to verify it,
+5. each hook target exists, patches, passes ASM data-flow verification and is accepted by
+   the JVM verifier.
 
 ```bash
-java -jar vanta-injector-1.0.0.jar --list          # see running 1.21.11 instances
-java -jar vanta-injector-1.0.0.jar                 # auto-detect, attach, load client
-java -jar vanta-injector-1.0.0.jar --pid 4821 --client vanta-client-1.0.0.jar
+java -cp injector/build/libs/vanta-1.0.0.jar tools/Verify.java \
+     client/build/devlibs/vanta-client-1.0.0-dev.jar \
+     ~/.gradle/caches/fabric-loom/1.21.11/minecraft-client.jar
 ```
 
-`--list` prints pid and command for every Fabric 1.21.11 process it can see. Attach needs the
-same user account as the game, and the game must run on a **JDK** (the attach API ships with
-`jdk.attach`, not a JRE). A log goes to `vanta-inject.log` in the working directory.
-
-#### How the injector works
-
-1. `VirtualMachine.attach(pid)` → `loadAgent(agentJar, "client=<path>;log=<path>")`.
-2. `GameLoader` finds the class loader the render thread actually uses (Knot on Fabric).
-3. `Resolver` wraps fabric-loader's `MappingResolver` and converts the Yarn names in the hook
-   table to the runtime (intermediary) names — nothing is hardcoded.
-4. The client jar is opened in a `URLClassLoader` parented to the game loader, so Minecraft
-   types resolve while client classes stay isolated.
-5. `Hooks` retransforms four classes with straight-line ASM insertions:
-
-| Target | Insert | Hook |
-| --- | --- | --- |
-| `MinecraftClient#tick` | entry | `Bridge.onTick()` |
-| `InGameHud#render` | before each `RETURN` | `Bridge.onHud(context)` |
-| `Entity#setVelocityClient` | argument replace | `Bridge.filterVelocity(self, velocity)` |
-| `ClientPlayerInteractionManager#attackEntity` | entry | `Bridge.onAttack(player, target)` |
-
-Nothing branches, so `COMPUTE_MAXS` is enough and the original stack map frames stay valid.
-`Bridge` is the only shared class and it references nothing but `java.base` — the game loader
-can link it on the hot path without touching client classes.
-
-On the Fabric path the same four points are hooked with Mixin (see `dev/vanta/mixin`), including
-hitbox expansion on `Entity#getBoundingBox` (mod path only).
-
----
-
-## Keys
-
-| Key | Action |
-| --- | --- |
-| `RSHIFT` | open / close the menu |
-| click a card | toggle the module |
-| hover a card | load its settings in the right column |
-| drag the header | move the window |
-| scroll | module list / settings list |
-| bind chip | click, then press a key (`ESC` clears) |
-| type in the search pill | filters across every category |
-
----
-
-## Config
-
-`config/vanta/config.json`, written on toggle and at shutdown:
-
-```json
-{
-  "modules": {
-    "KillAura": {
-      "enabled": true,
-      "key": -1,
-      "settings": {
-        "Range": 3.1,
-        "Min CPS": 9,
-        "Max CPS": 13,
-        "Sort": "Distance",
-        "Rotations": true
-      }
-    }
-  }
-}
-```
-
-Unknown or corrupt keys are ignored; a bad file boots clean rather than failing.
-
----
-
-## Project map
+Last run:
 
 ```
-client/
-  src/main/java/dev/vanta/
-    Vanta.java                  client root, frame + hook funnel
-    core/                       modules, settings, config, targeting, rotations, stats
-    modules/combat/             13 combat modules
-    modules/visual/             watermark, target hud, hit marker
-    modules/client/             interface (bind + accent)
-    gui/ClickGui.java           the menu
-    render/                     Render2D primitives + Theme tokens
-    util/                       angles, input, clicker, packets, inventory, combat
-    mixin/                      4 mixin classes, 5 injection points
-    agent/Injected.java         bootstrap used by the injector path
-  src/main/resources/           fabric.mod.json, vanta.mixins.json, icon
-
-injector/
-  src/main/java/dev/vanta/injector/
-    Main.java                   attach CLI (+ --list)
-    Agent.java                  premain / agentmain
-    GameLoader.java             render-thread class loader discovery
-    Resolver.java               yarn -> runtime mappings
-    Hooks.java                  ASM transformer + retransform
-    Log.java
-  src/main/java/dev/vanta/agent/
-    Bridge.java                 loader-neutral hook contract
+mappings: 10275 classes, 96465 members
+remapped 48/48 client classes
+linked 48/48 remapped classes in the JVM
+hooks: [MinecraftClient#tick -> gfj#x()V, InGameHud#render -> giq#a(Lgir;Lgez;)V,
+        ClientPlayerInteractionManager#attackEntity -> hio#a(Lddm;Lcgk;)V,
+        Entity#setVelocityClient -> cgk#j(Lftm;)V,
+        Entity#getBoundingBox -> cgk#dj()Lfth;]
+  patched + verified gfj / giq / hio / cgk
+RESULT: all checks passed
 ```
 
----
+The agent was also run in a real JVM with the 1.21.11 jar on the classpath: it bound all
+five hooks, retransformed all four classes and reported `vanta is live`.
 
-## Technical notes
+## Regenerating mappings
 
-- **Reach** is attribute based: the server still enforces its own interaction range, so values
-  past the server's limit are rejected there, not here.
-- **HitBox** is client side only. It changes what you can click, not what the server accepts.
-- **Velocity** returns the scaled vector instead of writing it, so the caller (mixin or bridge)
-  applies it once. No double application, no stale state.
-- **Criticals** sends one spoofed position tick and lets the normal movement packet correct it.
-- **AntiBot** uses tab-list presence, which is the cheapest reliable NPC tell on practice servers.
-- Module exceptions cannot take down the render or tick thread on the injected path (`Injected`
-  guards every bridge call and rate-limits the log).
-- The agent path needs a Fabric runtime: it resolves every target through fabric-loader's
-  mapping API, and the client jar ships in intermediary names. Vanilla (obfuscated) instances
-  are not a supported target.
-- **HitBox and reach mixing**: hitbox expansion is mod-path only; the injection path covers tick,
-  HUD, knockback and attack.
+`client/src/main/resources/vanta/mappings.bin` was produced by `tools/MappingGen.java`
+from the Yarn `mergedv2` mappings and the official obfuscated client jar:
 
-### Verified in this environment
+```bash
+java tools/MappingGen.java mappings.tiny minecraft-client.jar \
+     client/src/main/resources/vanta/mappings.bin
+```
 
-| Check | Result |
-| --- | --- |
-| `./gradlew clean build` (both modules) | pass |
-| Mixin targets remapped by Loom | pass — `method="method_1574"` in the built class |
-| Client jar excludes `Bridge` (compileOnly) | pass |
-| Injector jar: manifest, Bridge, shaded ASM | pass |
-| Agent harness (stub JVM, `-javaagent`, fake game classes) | pass — 4/4 hooks installed, `ticks=3 huds=1 attacks=1 velocities=1`, velocity replacement applied by the JVM (`Vec3d[2,3,4] → Vec3d[1,3,2]`) |
+Re-run it when the game version or Yarn build changes; nothing else in the client needs
+to know.
 
-Not verified here: an actual Minecraft session (no GPU/display in the build environment), so the
-visual pass and in-game behaviour still need a real client run.
+## Notes and limits
 
----
+- **Vanilla 1.21.11 only.** The mapping table is generated from the official obfuscated
+  jar. Launchers that rewrite the jar with their own names (lunar, badlion) are not
+  covered.
+- Reach, HitBox and Velocity are client-side; servers with their own reach/knockback
+  checks can still reject them.
+- The client was verified against the real bytecode as described above, but this
+  environment has no display, so the menu has not been looked at in a live game. First
+  launch with the HUD and menu open is the remaining visual check.
 
-## License
+## Layout
 
-MIT — see `LICENSE`.
+```
+client/src/main/java/dev/vanta/
+  Bootstrap.java        injected entry point, wires Bridge
+  Vanta.java            client root, frame hooks
+  agent/Bridge.java     hook seam (java.base only)
+  core/                 modules, settings, config, targeting, rotations, stats
+  modules/combat/       13 combat modules
+  modules/visual/       watermark, target hud, hit marker
+  render/               theme, Render2D
+  gui/ClickGui.java     the menu
+injector/src/main/java/dev/vanta/
+  agent/Agent.java      premain / agentmain
+  agent/Mappings.java   runtime mapping table, hierarchy-aware lookups
+  agent/ClientLoader.java  remapping class loader
+  agent/Hooks.java      target resolution + ASM patch rules
+  injector/Main.java    attach CLI
+tools/                  mapping generator, verifier
+```

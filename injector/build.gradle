@@ -3,12 +3,24 @@ plugins {
 }
 
 base {
-    archivesName = "${archives_base_name}-injector"
+    archivesName = "${archives_base_name}"
+}
+
+configurations {
+    clientBundle {
+        canBeConsumed = false
+        canBeResolved = true
+    }
 }
 
 dependencies {
     implementation "org.ow2.asm:asm:${asm_version}"
     implementation "org.ow2.asm:asm-commons:${asm_version}"
+    // Used to validate every patched class before it goes back to the JVM.
+    implementation "org.ow2.asm:asm-util:${asm_version}"
+
+    // Client classes are shipped, never linked: the agent loads them itself.
+    clientBundle files(project(':client').tasks.named('jar').flatMap { it.archiveFile })
 }
 
 java {
@@ -17,20 +29,24 @@ java {
 }
 
 jar {
+    dependsOn ':client:jar'
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     manifest {
         attributes(
                 'Main-Class': 'dev.vanta.injector.Main',
-                'Premain-Class': 'dev.vanta.injector.Agent',
-                'Agent-Class': 'dev.vanta.injector.Agent',
+                'Premain-Class': 'dev.vanta.agent.Agent',
+                'Agent-Class': 'dev.vanta.agent.Agent',
                 'Can-Retransform-Classes': 'true',
                 'Can-Redefine-Classes': 'true',
-                'Implementation-Title': 'Vanta Injector',
+                'Implementation-Title': 'Vanta',
                 'Implementation-Version': project.version
         )
     }
-    // Fat jar: ASM is shaded in so the agent works with nothing on the classpath.
+    // ASM and the generated mapping table ride along, then the client classes.
     from {
         configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    from {
+        configurations.clientBundle.collect { zipTree(it) }
     }
 }

@@ -24,7 +24,7 @@ public final class HitBox extends Module {
         instance = this;
     }
 
-    /** Used by the entity mixin; returns the original box untouched when off. */
+    /** Used by the entity hook; returns the original box untouched when off. */
     public static Box apply(Entity entity, Box original) {
         HitBox module = instance;
         if (module == null || !module.enabled() || entity == Vanta.mc().player) {

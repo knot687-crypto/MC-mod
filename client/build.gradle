@@ -7,28 +7,17 @@ base {
 }
 
 dependencies {
+    // Compile time only: Loom provides the Yarn-named 1.21.11 classes. Nothing from
+    // Fabric Loader or Fabric API is linked or shipped - the agent supplies the runtime.
     minecraft "com.mojang:minecraft:${minecraft_version}"
     mappings "net.fabricmc:yarn:${yarn_mappings}:v2"
-    modImplementation "net.fabricmc:fabric-loader:${loader_version}"
-    modImplementation "net.fabricmc.fabric-api:fabric-api:${fabric_version}"
-
-    // The @Bridge contract lives in the agent jar; compile against it, never bundle it.
-    compileOnly project(':injector')
 }
 
-loom {
-    // Loom 1.14 remaps mixin targets natively; no annotation processor or refmap file.
-    mixin {
-        defaultRefmapName = "vanta.refmap.json"
-    }
-    runs {
-        client {
-            client()
-            ideConfigGenerated = true
-            vmArg '-Dvanta.dev=true'
-        }
-    }
-}
+/**
+ * The plain jar keeps the Yarn (named) namespace, which is what the agent's remapper
+ * consumes at injection time. Loom writes it to devlibs and its remapJar output is not
+ * used by anything.
+ */
 
 java {
     withSourcesJar()
@@ -36,15 +25,8 @@ java {
     targetCompatibility = JavaVersion.VERSION_21
 }
 
-processResources {
-    inputs.property 'version', project.version
-    filesMatching('fabric.mod.json') {
-        expand 'version': inputs.properties.version
-    }
-}
-
 jar {
     from(rootProject.file('LICENSE')) {
-        rename { "${it}_${project.base.archivesName.get()}" }
+        rename { "LICENSE_${project.base.archivesName.get()}" }
     }
 }

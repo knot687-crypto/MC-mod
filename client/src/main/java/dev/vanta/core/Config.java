@@ -10,8 +10,9 @@ import dev.vanta.core.setting.KeySetting;
 import dev.vanta.core.setting.ModeSetting;
 import dev.vanta.core.setting.NumberSetting;
 import dev.vanta.core.setting.Setting;
-import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.client.MinecraftClient;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -20,8 +21,6 @@ import java.nio.file.StandardCopyOption;
 /** Flat json config, one section per module, saved on toggle and on shutdown. */
 public final class Config {
 
-    private static final Path DIR = FabricLoader.getInstance().getConfigDir().resolve("vanta");
-    private static final Path FILE = DIR.resolve("config.json");
     private static volatile boolean dirty;
 
     private Config() {
@@ -62,21 +61,30 @@ public final class Config {
         root.add("modules", modules);
 
         try {
-            Files.createDirectories(DIR);
-            Path temp = DIR.resolve("config.json.tmp");
+            Path dir = dir();
+            Files.createDirectories(dir);
+            Path temp = dir.resolve("config.json.tmp");
             Files.writeString(temp, new GsonBuilder().setPrettyPrinting().create().toJson(root));
-            Files.move(temp, FILE, StandardCopyOption.REPLACE_EXISTING);
+            Files.move(temp, dir.resolve("config.json"), StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException ignored) {
             // A failed write leaves the previous file intact; nothing else to do at shutdown.
         }
     }
 
+    /** {@code <game dir>/config/vanta}; the game directory comes from Minecraft itself. */
+    private static Path dir() {
+        MinecraftClient client = Vanta.mc();
+        File run = client != null && client.runDirectory != null ? client.runDirectory : new File(".");
+        return run.toPath().resolve("config").resolve("vanta");
+    }
+
     public static void load() {
-        if (!Files.exists(FILE)) {
+        Path file = dir().resolve("config.json");
+        if (!Files.exists(file)) {
             return;
         }
         try {
-            JsonObject root = JsonParser.parseString(Files.readString(FILE)).getAsJsonObject();
+            JsonObject root = JsonParser.parseString(Files.readString(file)).getAsJsonObject();
             JsonObject modules = root.getAsJsonObject("modules");
             if (modules == null) {
                 return;

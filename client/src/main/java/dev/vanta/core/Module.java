@@ -1,6 +1,7 @@
 package dev.vanta.core;
 
 import dev.vanta.Vanta;
+import net.minecraft.client.MinecraftClient;
 import dev.vanta.core.setting.BoolSetting;
 import dev.vanta.core.setting.KeySetting;
 import dev.vanta.core.setting.ModeSetting;
@@ -75,7 +76,9 @@ public abstract class Module {
         } else {
             onDisable();
         }
-        if (Vanta.mc().player != null) {
+        // The game may not exist yet when the agent boots the client.
+        MinecraftClient client = Vanta.mc();
+        if (client != null && client.player != null) {
             Config.markDirty();
         }
     }

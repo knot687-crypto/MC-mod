@@ -1,12 +1,14 @@
-package dev.vanta.injector;
+package dev.vanta.agent;
 
 import java.io.FileOutputStream;
 import java.io.PrintStream;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 
-/** Plain logger; every line goes to stderr and to vanta-inject.log when a file is set. */
+/** Every line goes to stderr and to the log file set by the agent arguments. */
 public final class Log {
 
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("HH:mm:ss.SSS");
@@ -37,18 +39,19 @@ public final class Log {
 
     public static void error(String message, Throwable throwable) {
         write("ERROR", message + " :: " + throwable);
-        Throwable cause = throwable.getCause();
-        while (cause != null) {
-            write("ERROR", "  caused by " + cause);
-            cause = cause.getCause();
+        StringWriter trace = new StringWriter();
+        throwable.printStackTrace(new PrintWriter(trace));
+        for (String line : trace.toString().split("\\R")) {
+            write("ERROR", "  " + line);
         }
     }
 
     private static void write(String level, String message) {
         String line = "[" + LocalTime.now().format(TIME) + "] [" + level + "] " + message;
         System.err.println("[vanta] " + line);
-        if (file != null) {
-            file.println(line);
+        PrintStream sink = file;
+        if (sink != null) {
+            sink.println(line);
         }
     }
 }
